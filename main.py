@@ -21,8 +21,8 @@ def arp_poison_targets(victims, sleep=0):
     print(sleep)
     assert len(victims) >= 2, 'We must have at least 2 victims to poison'
     while True:
-        for i in range(len(victims)):
-            for j in range(len(victims) - 1):
+        for i in range(len(victims) - 1):
+            for j in range(j, len(victims)):
                 print(i, j)
                 # arp poison both ways
                 arp_poisoning(victims[i], victims[j])
