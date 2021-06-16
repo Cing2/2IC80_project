@@ -1,10 +1,12 @@
 import sys
 from subprocess import Popen, PIPE
 # from scapy.all import *
+from scapy.arch import get_if_list
 from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
+from scapy.main import load_layer
 from scapy.sendrecv import sendp, send, sniff, AsyncSniffer
 
 import argparse
@@ -33,7 +35,13 @@ class MitMAttack:
 
     def __init__(self, args):
         # set arguments for the attack
+        load_layer('http')
+
+        self.network_interface = args.network_interface if args.network_interface else self.ask_network_interface()
+
         self.targets = [{'ip': ip} for ip in args.targets]
+        for target in self.targets:
+            target['mac'] = getmacbyip(target['ip'])
         self.arp_poison = args.arp_poison
 
         self.dns_spoofing_targets = [targets[i] for i in args.dns_spoof] if args.dns_spoof else []
@@ -45,6 +53,16 @@ class MitMAttack:
         # execute attack
         print('Starting mitm attack')
         # self.main()
+
+    @staticmethod
+    def ask_network_interface():
+        interfaces = get_if_list()
+        print("\nPlease choose the number of the interface you what to operate at:\n")
+        print(interfaces)
+        for i, iface in enumerate(interfaces):
+            print(str(i) + ": " + str(iface))
+        choice = int(input("\n Number: "))
+        return interfaces[choice]
 
     def main(self):
         """Run the attack"""
@@ -201,6 +219,9 @@ if __name__ == '__main__':
     target_group.add_argument('-targets', type=str, nargs='*', help='The ip addresses of the targets')
     target_group.add_argument('-targets_file', type=str,
                               help='The name of a file with the ip addresses of the targets on seperate lines')
+
+    parser.add_argument('-ninf', '--network_interface', type=str,
+                        help='The network interface to operate on, if not set will be asked dynamically')
 
     parser.add_argument('-arp', '--arp_poison', const=True, default=True, action='store_const',
                         help='If to ARP poison the targets')
