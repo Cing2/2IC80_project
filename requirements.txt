@@ -1,2 +1,2 @@
 # python 3.5>=
-scapy
+scapy>=2.4.5
